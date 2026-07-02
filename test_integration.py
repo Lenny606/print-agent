@@ -13,7 +13,8 @@ TEST_TOKEN = "TEST-INSTALL-TOKEN-123"
 MOCK_PRINTER_PORT = 9999
 
 # Test databases to clean up
-DB_FILES = ["cloud_print.db", "edge-client/test_edge_queue.db"]
+DB_FILES = ["cloud-api/CloudApi/cloud_print.db", "edge-client/test_edge_queue.db"]
+
 
 
 # Global lists for cleanup
@@ -72,15 +73,15 @@ def cleanup():
             except Exception:
                 pass
 
-    print("\n--- Cleaning up database files ---", flush=True)
-    for db in DB_FILES:
-        p = Path(db)
-        if p.exists():
-            try:
-                p.unlink()
-                print(f"Deleted database file: {db}", flush=True)
-            except Exception as e:
-                print(f"Failed to delete {db}: {e}", flush=True)
+    print("\n--- Keeping database files for debugging ---", flush=True)
+    # for db in DB_FILES:
+    #     p = Path(db)
+    #     if p.exists():
+    #         try:
+    #             p.unlink()
+    #             print(f"Deleted database file: {db}", flush=True)
+    #         except Exception as e:
+    #             print(f"Failed to delete {db}: {e}", flush=True)
 
 def main():
     # Clean up any leftover databases before starting
@@ -158,20 +159,18 @@ def main():
                 response = httpx.get(f"{API_URL}/v1/debug/status")
                 data = response.json()
                 agents = data.get("agents", [])
-                if agents:
-                    agent_id = agents[0]["id"]
+                test_agent = next((a for a in agents if a.get("name") == "IntegrationTestAgent"), None)
+                if test_agent:
+                    agent_id = test_agent["id"]
                     print(f"Agent successfully registered. ID: {agent_id}", flush=True)
                     break
+
             except Exception as e:
                 print(f"Error checking registration: {e}", flush=True)
             time.sleep(1.0)
 
         if not agent_id:
-            print("ERROR: Agent failed to register. Agent output snapshot:")
-            # Read whatever output is available
-            # To prevent blocking, we use non-blocking check
-            time.sleep(2.0)
-            sys.exit(1)
+            raise RuntimeError("Agent failed to register within the timeout period.")
 
         # 4. Map Printer in Cloud API
         print("\n--- Registering printer config map in Cloud API ---", flush=True)

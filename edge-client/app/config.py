@@ -1,6 +1,7 @@
 import os
 import platform
 import sqlite3
+import sys
 from pathlib import Path
 import logging
 
@@ -29,8 +30,8 @@ def get_data_dir() -> Path:
     return path
 
 # Load local config.json if present
-import sys
 import json
+
 
 if getattr(sys, 'frozen', False):
     exe_dir = Path(sys.executable).parent
@@ -51,6 +52,7 @@ if config_file.exists():
 CLOUD_API_URL = os.getenv("CLOUD_API_URL", "http://localhost:5000")
 INSTALL_TOKEN = os.getenv("INSTALL_TOKEN", "")
 AGENT_NAME = os.getenv("AGENT_NAME", "PythonEdgeAgent")
+CREDENTIAL_STORAGE = os.getenv("CREDENTIAL_STORAGE", "keyring" if is_windows() else "sqlite").lower()
 
 # SQLite DB Path
 DB_PATH = Path(os.getenv("EDGE_DB_PATH", str(get_data_dir() / "edge_queue.db"))).resolve()
@@ -125,9 +127,9 @@ def _load_from_sqlite() -> tuple[str | None, str | None]:
 def save_credentials(client_id: str, client_secret: str) -> bool:
     """
     Saves the agent's client ID and client secret.
-    Uses Keyring on native Windows, and SQLite fallback on Linux/Docker.
+    Uses Keyring if CREDENTIAL_STORAGE is 'keyring', and SQLite fallback if 'sqlite'.
     """
-    if is_windows():
+    if CREDENTIAL_STORAGE == "keyring":
         try:
             import keyring
             keyring.set_password(KEYRING_SERVICE_NAME, KEYRING_CLIENT_ID_KEY, client_id)
@@ -149,9 +151,9 @@ def save_credentials(client_id: str, client_secret: str) -> bool:
 def load_credentials() -> tuple[str | None, str | None]:
     """
     Loads the client ID and client secret.
-    Tries Keyring first on Windows, then falls back to SQLite database storage.
+    Tries Keyring first if CREDENTIAL_STORAGE is 'keyring', then falls back to SQLite database storage.
     """
-    if is_windows():
+    if CREDENTIAL_STORAGE == "keyring":
         try:
             import keyring
             client_id = keyring.get_password(KEYRING_SERVICE_NAME, KEYRING_CLIENT_ID_KEY)
@@ -171,3 +173,42 @@ def load_credentials() -> tuple[str | None, str | None]:
     except Exception as e:
         logger.error(f"Failed to load credentials from SQLite fallback: {e}")
         return None, None
+
+def save_metadata(key: str, value: str) -> bool:
+    """Saves arbitrary metadata to SQLite storage."""
+    try:
+        _init_sqlite_fallback_db()
+        conn = sqlite3.connect(str(DB_PATH))
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR REPLACE INTO agent_credentials (key, value) VALUES (?, ?)",
+                (key, value)
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.error(f"Failed to save metadata '{key}': {e}")
+        return False
+
+def load_metadata(key: str) -> str | None:
+    """Loads arbitrary metadata from SQLite storage."""
+    try:
+        _init_sqlite_fallback_db()
+        conn = sqlite3.connect(str(DB_PATH))
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT value FROM agent_credentials WHERE key = ?",
+                (key,)
+            )
+            row = cursor.fetchone()
+            return row[0] if row else None
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.error(f"Failed to load metadata '{key}': {e}")
+        return None
+

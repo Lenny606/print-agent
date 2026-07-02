@@ -57,7 +57,7 @@ async def print_pdf_file(file_path: Path, printer_name_or_queue: str) -> bool:
     try:
         if is_win:
             sumatra_path = get_sumatra_path()
-            cmd = [str(sumatra_path), "-print-to", printer_name_or_queue, str(file_path)]
+            cmd = [str(sumatra_path), "-print-to", printer_name_or_queue, "-silent", str(file_path)]
             logger.info(f"Executing Windows print command: {' '.join(cmd)}")
         else:
             cmd = ["lp", "-d", printer_name_or_queue, str(file_path)]
