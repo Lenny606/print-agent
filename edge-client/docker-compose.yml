@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  edge-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    network_mode: "host"
+    environment:
+      - CLOUD_API_URL=http://localhost:5000
+      - INSTALL_TOKEN=TEST-INSTALL-TOKEN-123
+      - AGENT_NAME=DockerEdgeAgent
+      - DOCKER_ENV=true
+    volumes:
+      - edge-data:/data
+    restart: unless-stopped
+
+volumes:
+  edge-data:
