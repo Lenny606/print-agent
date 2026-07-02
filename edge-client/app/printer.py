@@ -3,6 +3,8 @@ import subprocess
 import asyncio
 import logging
 from pathlib import Path
+import platform
+import sys
 
 logger = logging.getLogger("PrintAgent.Printer")
 
@@ -28,34 +30,55 @@ async def send_zpl_to_printer(ip_address: str, port: int, zpl_data: str) -> bool
         logger.error(f"Failed to transmit ZPL to printer {ip_address}:{port} : {e}")
         return False
 
+def get_sumatra_path() -> Path:
+    if getattr(sys, 'frozen', False):
+        base_dir = Path(sys.executable).parent
+    else:
+        base_dir = Path(__file__).resolve().parent.parent
+    
+    path1 = base_dir / "SumatraPDF.exe"
+    if path1.exists():
+        return path1
+    path2 = base_dir / "bin" / "SumatraPDF.exe"
+    if path2.exists():
+        return path2
+    return Path("SumatraPDF.exe")
+
 async def print_pdf_file(file_path: Path, printer_name_or_queue: str) -> bool:
     """
-    Prints a local PDF file using Linux CUPS commands (lp).
+    Prints a local PDF file. Uses SumatraPDF on Windows and Linux CUPS commands (lp) on Linux.
     """
     logger.info(f"Printing PDF {file_path} on queue '{printer_name_or_queue}'...")
     if not file_path.exists():
         logger.error(f"PDF file does not exist: {file_path}")
         return False
 
+    is_win = platform.system() == "Windows"
     try:
-        # Construct the lp command
-        cmd = ["lp", "-d", printer_name_or_queue, str(file_path)]
-        logger.debug(f"Executing system command: {' '.join(cmd)}")
+        if is_win:
+            sumatra_path = get_sumatra_path()
+            cmd = [str(sumatra_path), "-print-to", printer_name_or_queue, str(file_path)]
+            logger.info(f"Executing Windows print command: {' '.join(cmd)}")
+        else:
+            cmd = ["lp", "-d", printer_name_or_queue, str(file_path)]
+            logger.debug(f"Executing Linux print command: {' '.join(cmd)}")
         
         # Execute asynchronously in a thread pool to avoid blocking the main event loop
         loop = asyncio.get_running_loop()
-        def _run_lp():
+        def _run_print():
             return subprocess.run(cmd, capture_output=True, text=True, check=True)
             
-        result = await loop.run_in_executor(None, _run_lp)
+        result = await loop.run_in_executor(None, _run_print)
         logger.info(f"Successfully sent PDF to print queue: {result.stdout.strip()}")
         return True
     except subprocess.CalledProcessError as e:
-        logger.error(f"System lp print command failed. Code: {e.returncode}, Error: {e.stderr.strip()}")
+        err_out = e.stderr.strip() if e.stderr else ""
+        logger.error(f"Print command failed. Code: {e.returncode}, Error: {err_out}")
         return False
     except Exception as e:
         logger.error(f"Failed to execute print command: {e}")
         return False
+
 
 async def _check_host(ip: str, port: int, timeout: float = 0.5) -> dict | None:
     """Helper to check if a specific IP host has port open."""

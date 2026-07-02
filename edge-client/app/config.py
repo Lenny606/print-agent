@@ -6,24 +6,60 @@ import logging
 
 logger = logging.getLogger("PrintAgent.Config")
 
+def is_windows() -> bool:
+    # If explicitly running in Docker, treat as Linux even if host is Windows
+    if os.getenv("DOCKER_ENV", "").lower() in ("true", "1"):
+        return False
+    return platform.system() == "Windows"
+
+def get_data_dir() -> Path:
+    if is_windows():
+        program_data = os.environ.get("ProgramData")
+        if program_data:
+            path = Path(program_data) / "PrintAgent"
+        else:
+            if getattr(sys, 'frozen', False):
+                path = Path(sys.executable).parent / "data"
+            else:
+                path = Path(__file__).resolve().parent.parent / "data"
+    else:
+        path = Path(os.getenv("EDGE_DATA_DIR", ".")).resolve()
+    
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+# Load local config.json if present
+import sys
+import json
+
+if getattr(sys, 'frozen', False):
+    exe_dir = Path(sys.executable).parent
+else:
+    exe_dir = Path(__file__).resolve().parent.parent
+
+config_file = exe_dir / "config.json"
+if config_file.exists():
+    try:
+        with open(config_file, "r", encoding="utf-8") as f:
+            local_config = json.load(f)
+            for k, v in local_config.items():
+                os.environ.setdefault(k, str(v))
+    except Exception as e:
+        logger.warning(f"Failed to load config.json: {e}")
+
 # Environment settings
 CLOUD_API_URL = os.getenv("CLOUD_API_URL", "http://localhost:5000")
 INSTALL_TOKEN = os.getenv("INSTALL_TOKEN", "")
 AGENT_NAME = os.getenv("AGENT_NAME", "PythonEdgeAgent")
 
 # SQLite DB Path
-DB_PATH = Path(os.getenv("EDGE_DB_PATH", "edge_queue.db")).resolve()
+DB_PATH = Path(os.getenv("EDGE_DB_PATH", str(get_data_dir() / "edge_queue.db"))).resolve()
 
 # Keyring configuration
 KEYRING_SERVICE_NAME = "HybridEdgePrintAgent"
 KEYRING_CLIENT_ID_KEY = "client_id"
 KEYRING_CLIENT_SECRET_KEY = "client_secret"
 
-def is_windows() -> bool:
-    # If explicitly running in Docker, treat as Linux even if host is Windows
-    if os.getenv("DOCKER_ENV", "").lower() in ("true", "1"):
-        return False
-    return platform.system() == "Windows"
 
 def _init_sqlite_fallback_db():
     """Ensure the credentials table exists in SQLite if fallback is used."""

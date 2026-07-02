@@ -85,6 +85,20 @@ class EdgeAgent:
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60.0)
 
+    async def sync_config(self) -> bool:
+        """Syncs agent printer configurations from cloud."""
+        logger.info("Syncing agent configurations from Central Cloud...")
+        try:
+            config_data = await self.client.get_config()
+            if config_data and "printers" in config_data:
+                async with self.printers_lock:
+                    self.printers = {p["id"]: p for p in config_data["printers"]}
+                logger.info(f"Configuration synced. Registered printers: {list(self.printers.keys())}")
+                return True
+        except Exception as e:
+            logger.error(f"Error during config sync: {e}")
+        return False
+
     async def config_sync_loop(self):
         """Periodically syncs agent printer configurations from cloud."""
         while not self.shutdown_event.is_set():
@@ -92,12 +106,8 @@ class EdgeAgent:
                 await asyncio.sleep(5.0)
                 continue
 
-            logger.info("Syncing agent configurations from Central Cloud...")
-            config_data = await self.client.get_config()
-            if config_data and "printers" in config_data:
-                async with self.printers_lock:
-                    self.printers = {p["id"]: p for p in config_data["printers"]}
-                logger.info(f"Configuration synced. Registered printers: {list(self.printers.keys())}")
+            success = await self.sync_config()
+            if success:
                 # Sync successfully, sleep 60 seconds
                 await asyncio.sleep(60.0)
             else:
@@ -151,6 +161,12 @@ class EdgeAgent:
             # 1. Find printer configuration
             async with self.printers_lock:
                 printer_config = self.printers.get(printer_id)
+
+            if not printer_config:
+                logger.warning(f"Printer ID {printer_id} not found in local config. Retrying config sync immediately...")
+                await self.sync_config()
+                async with self.printers_lock:
+                    printer_config = self.printers.get(printer_id)
 
             if not printer_config:
                 error_msg = f"Printer ID {printer_id} not configured locally on this agent."
